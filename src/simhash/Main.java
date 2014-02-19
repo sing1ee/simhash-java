@@ -4,12 +4,13 @@
 package simhash;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.BitSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
@@ -19,7 +20,7 @@ import com.google.common.io.Files;
 
 /**
  * @author zhangcheng
- *
+ * 
  */
 public class Main {
 
@@ -27,29 +28,48 @@ public class Main {
 	 * @param args
 	 */
 	public static void main(String[] args) throws Exception {
-		
+
 		if (args.length != 2) {
 			System.err.println("Usage: inputfile outputfile");
 			return;
 		}
+		long start = System.nanoTime();
+		// Creates SimHash object.
 		Simhash simHash = new Simhash(new BinaryWordSeg());
-		ArrayList<Long> hashes = Lists.newArrayList();
-		Map<String, HashSet<Integer>> hashIndex = Maps.newHashMap();
-		List<String> lines = Files.readLines(new File(args[0]), Charsets.UTF_8);
+
+		// DocHashes is a list that will contain all of the calculated hashes.
+		ArrayList<Long> docHashes = Lists.newArrayList();
+
+		// Maps 12-bit key with the documents matching the partial hash
+		Map<BitSet, HashSet<Integer>> hashIndex = Maps.newHashMap();
+
+		// Read the documents. (Each line represents a document).
+		List<String> docs = readDocs(args);
+
 		int idx = 0;
-		System.out.println("start to build index");
-		for(String line : lines) {
-			long hash = simHash.simhash64(line);
-			System.out.println(line + " " + hash);
-			hashes.add(hash);
-			StringBuilder bui = new StringBuilder();
+
+		System.out.println("Start to build index...");
+		for (String doc : docs) {
+			// Calculate the document hash.
+			long docHash = simHash.simhash64(doc);
+			System.out.println("Document=[" + doc + "] Hash=[" + docHash + "]");
+
+			// Store the document hash in a list.
+			docHashes.add(docHash);
+
+			// StringBuilder keyBuilder = new StringBuilder(12);
+			BitSet key = new BitSet(12);
+
 			int step = 0;
-			for(int i = 0; i < 64; ++i) {
-				bui.append((hash >> i) & 1);
-				++step;
-				if (step % 12 == 0) {
-					String key = bui.toString();
-					bui = new StringBuilder();
+
+			for (int i = 0; i < 64; ++i) {
+				key.set(step, ((docHash >> i) & 1) == 1);
+				if (step++ == 12) {
+					/*
+					 * a) Separates the hash in 12-bit keys. b) This value will
+					 * be a key in hashIndex. c) hashIndex will contain sets of
+					 * documents matching each key (12-bits).
+					 */
 					if (hashIndex.containsKey(key)) {
 						hashIndex.get(key).add(idx);
 					} else {
@@ -57,57 +77,74 @@ public class Main {
 						vector.add(idx);
 						hashIndex.put(key, vector);
 					}
+					step = 0;
+					key = new BitSet(12); // reset key holder.
 				}
 			}
 			++idx;
 		}
-		System.out.println("build index done");
+		System.out.println("Index has been built.");
 		File output = new File(args[1]);
 		idx = 0;
-		int[] bits = new int[lines.size()];
-		for(String line : lines) {
-			if (bits[idx] == 1) {
+		BitSet bits = new BitSet(docs.size());
+
+		for (String doc : docs) {
+			// For each document.
+
+			if (bits.get(idx)) {
 				++idx;
 				continue;
 			}
-			long hash = simHash.simhash64(line);
-			StringBuilder bui = new StringBuilder();
+
+			// Calculates document hash.
+			long docHash = simHash.simhash64(doc);
+			BitSet key = new BitSet(12);
+
 			int step = 0;
-			HashSet<Integer> mayNos = Sets.newHashSet();
-			for(int i = 0; i < 64; ++i) {
-				bui.append((hash >> i) & 1);
-				++step;
-				if (step % 12 == 0) {
-					String key = bui.toString();
-					bui = new StringBuilder();
+			HashSet<Integer> docSimilarCandidates = Sets.newHashSet();
+			for (int i = 0; i < 64; ++i) {
+				key.set(step, ((docHash >> i) & 1) == 1);
+
+				if (step++ == 12) {
+					/*
+					 * a) Separates the hash in 12-bit keys. b) This value will
+					 * be a key in hashIndex. c) hashIndex will contain sets of
+					 * documents matching each key (12-bits).
+					 */
 					if (hashIndex.containsKey(key)) {
-						mayNos.addAll(hashIndex.get(key));
+						docSimilarCandidates.addAll(hashIndex.get(key));
 					}
+					step = 0;
+					key = new BitSet(12);
 				}
 			}
-			List<Integer> sameNos = Lists.newLinkedList();
-			Map<Integer, Integer> dists = Maps.newHashMap();
-			for(Integer i : mayNos) {
-				int dist = simHash.hammingDistance(hash, hashes.get(i));
+			List<Integer> similarDocs = Lists.newLinkedList();
+			Map<Integer, Integer> docDistances = Maps.newHashMap();
+			for (Integer i : docSimilarCandidates) {
+				int dist = simHash.hammingDistance(docHash, docHashes.get(i));
 				if (dist <= 3) {
-					sameNos.add(i);
-					bits[i] = 1;
-					dists.put(i, dist);
+					similarDocs.add(i);
+					bits.set(idx);
+					docDistances.put(i, dist);
 				}
 			}
-			if (!sameNos.isEmpty()) {
-				Files.append("start\n", output, Charsets.UTF_8);
-				Files.append(lines.get(idx) + "\n", output, Charsets.UTF_8);
-				for(int i : sameNos) {
-					if (i == idx) continue;
-					Files.append(lines.get(i) + "\t" + dists.get(i) + "\n", output, Charsets.UTF_8);
+			if (!similarDocs.isEmpty()) {
+				Files.append("Documents similar as [" + doc + "]:\n", output, Charsets.UTF_8);
+				for (int i : similarDocs) {
+					if (i == idx)
+						continue;
+					Files.append("[" + docs.get(i) + "]\tDistance=[" + docDistances.get(i) + "]\n", output, Charsets.UTF_8);
 				}
-				Files.append("end\n", output, Charsets.UTF_8);
+				Files.append("End\n", output, Charsets.UTF_8);
 			}
-			bits[idx] = 1;
+			bits.set(idx);
 			++idx;
 		}
-		
+
+		System.out.println("Elapsed time: " + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
 	}
 
+	private static List<String> readDocs(String[] args) throws IOException {
+		return Files.readLines(new File(args[0]), Charsets.UTF_8);
+	}
 }
