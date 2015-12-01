@@ -124,7 +124,7 @@ public class Main {
 				int dist = simHash.hammingDistance(docHash, docHashes.get(i));
 				if (dist <= 3) {
 					similarDocs.add(i);
-					bits.set(idx);
+					bits.set(i);
 					docDistances.put(i, dist);
 				}
 			}
