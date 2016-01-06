@@ -22,4 +22,7 @@ end //end flag<br />
 1. Build the project to a runnable jar.<br />  
 2. Improve the performace under big data.<br />  
 
+### Note:
+1. Before run Main.java, you should choose a better analyzer instead of BinaryWordSeg!
+
 
