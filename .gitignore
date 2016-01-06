@@ -1,0 +1,22 @@
+# idea IDE
+out
+.idea
+*.iml
+*.ipr
+*.iws
+
+# eclipse IDE
+.classpath
+.project
+.settings
+
+# build
+.gradle
+build
+
+#mac
+.DS_Store
+
+#log
+logs
+/target/
