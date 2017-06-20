@@ -55,7 +55,7 @@ public class Simhash {
 		long hash = 0x0000000000000000;
 		long one = 0x0000000000000001;
 		for (int i = bitLen; i >= 1; --i) {
-			if (bits[i - 1] > 1) {
+			if (bits[i - 1] > 0) {
 				hash |= one;
 			}
 			one = one << 1;
